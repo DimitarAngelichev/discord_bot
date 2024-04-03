@@ -1,7 +1,7 @@
 // Require the necessary discord.js classes
 const fs = require('node:fs');
 const path = require('node:path');
-const { Client, Collection, GatewayIntentBits } = require('discord.js');
+const { Client, Collection, GatewayIntentBits,Events } = require('discord.js');
 const { token } = require('./config.json');
 
 // Create a new client instance
@@ -49,6 +49,25 @@ for (const file of eventFiles) {
 		client.on(event.name, (...args) => event.execute(...args));
 	}
 }
+
+client.on(Events.InteractionCreate, async interaction => {
+	if (interaction.isChatInputCommand()) {
+		// command handling
+	} else if (interaction.isAutocomplete()) {
+		const command = interaction.client.commands.get(interaction.commandName);
+
+		if (!command) {
+			console.error(`No command matching ${interaction.commandName} was found.`);
+			return;
+		}
+
+		try {
+			await command.autocomplete(interaction);
+		} catch (error) {
+			console.error(error);
+		}
+	}
+});
 
 // Log in to Discord with client's token
 client.login(token);
