@@ -27,16 +27,18 @@ module.exports = {
         const focusedOption = interaction.options.getFocused(true);
         let choices;
 
-        if (focusedOption.name === 'query') {
+        if (focusedOption.name === 'query' && focusedOption.value != '') {
             choices = await search_youtube(focusedOption.value);
         }
 
-        await interaction.respond(
-            choices.map(choice => ({ name: choice.title, value: choice.url }))
-        );
+        if (choices != undefined) {
+            await interaction.respond(
+                choices.map(choice => ({ name: choice.title, value: choice.url }))
+            );
+        }
     },
     async execute(interaction) {
-
+        let currentPlayingMessageId;
 
         const stop = new ButtonBuilder()
             .setCustomId('stop')
@@ -52,7 +54,6 @@ module.exports = {
             .setCustomId('next')
             .setLabel('Next Song')
             .setStyle(ButtonStyle.Primary);
-
 
         const row = new ActionRowBuilder()
         .addComponents(pause,next,stop);
@@ -70,7 +71,13 @@ module.exports = {
         // YouTube URL (or search query).
 
         await interaction.deferReply();
-        const songQuery = interaction.options.getString('query'); // Get the user's query
+        let songQuery = interaction.options.getString('query'); // Get the user's query
+
+        // If query is not a youtube url, then get the first result and use that as the url
+        if (false == songQuery.includes("https://youtube.com/watch?v=")) {
+            const youtubeSearchResult = await search_youtube(songQuery)
+            songQuery = youtubeSearchResult[0].url;
+        }
 
         try {
             // The bot should logically join the channel of the user who issued the command.
@@ -82,17 +89,6 @@ module.exports = {
                 selfDeaf: false
             });
 
-            // If command is to stop, then stop the currently playing song
-            if (songQuery === 'stop') {
-                const subscription = voiceChannel.guild.voiceStates.subscription;
-
-                if (subscription) {
-                    connection.destroy();
-                    return await interaction.editReply(`Stopped playing.`);
-                } else {
-                    return await interaction.editReply(`No song currently playing.`);
-                }
-            }
             console.log('searching for query: ' + songQuery)
 
             const songInfo = await ytdl.getInfo(songQuery); // Fetch info about the video
@@ -107,11 +103,44 @@ module.exports = {
             player.play(resource);
             connection.subscribe(player);
 
-            return await interaction.editReply({content:`Now playing: ${songQuery}!`, components: [row]});
+            const collector = interaction.channel.createMessageComponentCollector();
+
+            collector.on('collect', async interaction => {
+                // check player.state.status == 'idle'
+                console.log(`Check message.id: inter: ${interaction.message.id} curr: ${currentPlayingMessageId}`);
+                // TODO: somehow have to handle stopped songs, idle players
+
+                if (interaction.customId === 'stop' && interaction.message.id === currentPlayingMessageId) {
+                    if (player) {
+                        await player.stop();
+                        return await interaction.reply('Song stopped!');
+                    } else {
+                        return await interaction.reply('No audio is currently playing.');
+                    }
+                }
+                if (interaction.customId === 'pause' && interaction.message.id === currentPlayingMessageId) {
+                    if (player.state.status == "playing") {
+                        await player.pause();
+                        return await interaction.reply('Song paused!');
+                    } else if (player.state.status == "paused") {
+                        await player.unpause();
+                        return await interaction.reply('Resume playing.');
+                    } else {
+                        return await interaction.reply(`Unknown state during pause/resume action! State: ${player.state.status}`);
+                    }
+                }
+
+                // Add handler for 'next' after implementing queue.
+            });
+
+            return await interaction.editReply({
+                content: `Now playing: ${songQuery}!`,
+                components: [row]
+            }).then(msg => currentPlayingMessageId = msg.id);
+
         } catch (error) {
             console.error(error);
             return await interaction.editReply(`Error: Could not find a song with query "${songQuery}".`);
         }
-
     }
 };
