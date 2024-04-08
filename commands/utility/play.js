@@ -1,17 +1,7 @@
 const { SlashCommandBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder } = require('discord.js');
 const { joinVoiceChannel, createAudioPlayer, createAudioResource } = require('@discordjs/voice');
 const ytdl = require('ytdl-core');
-const yts = require('yt-search')
-
-async function search_youtube(query) {
-    try {
-        const r = await yts(query)
-        const res = r.videos.slice(0, 10);
-        return res
-    } catch (error) {
-        return console.log(`Error when searching youtube for ${query}. ` + error)
-    }
-}
+const shared_data = require('./shared.js');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -28,7 +18,7 @@ module.exports = {
         let choices;
 
         if (focusedOption.name === 'query' && focusedOption.value != '') {
-            choices = await search_youtube(focusedOption.value);
+            choices = await shared_data.search_youtube(focusedOption.value);
         }
 
         if (choices != undefined) {
@@ -75,7 +65,7 @@ module.exports = {
 
         // If query is not a youtube url, then get the first result and use that as the url
         if (false == songQuery.includes("https://youtube.com/watch?v=")) {
-            const youtubeSearchResult = await search_youtube(songQuery)
+            const youtubeSearchResult = await shared_data.search_youtube(songQuery)
             songQuery = youtubeSearchResult[0].url;
         }
 
@@ -92,16 +82,47 @@ module.exports = {
             console.log('searching for query: ' + songQuery)
 
             const songInfo = await ytdl.getInfo(songQuery); // Fetch info about the video
-            const stream = ytdl(songInfo.videoDetails.video_url, { filter: 'audioonly' });
+            let stream = ytdl(songInfo.videoDetails.video_url, { filter: 'audioonly' });
             // 3. Creating Audio Resources: Converting the fetched stream into an audio resource
             // using createAudioResource from @discordjs/voice.
-            const player = createAudioPlayer();
-            const resource = createAudioResource(stream);
+            let player = createAudioPlayer();
+            let resource = createAudioResource(stream);
+
+            // TODO:DONE create queue of songs, that queue.js can add songs to.
 
             // 4. Audio Playback: Using the @discordjs/voice functions to play
             // the audio resource in the voice channel.
             player.play(resource);
             connection.subscribe(player);
+
+            // TODO: whenever player is idle -> check queue for song and play it
+            // (also remove it from queue after playing it)
+            // player.on("idle", input => {
+            //     console.log("player is idle!!");
+            //     if (shared_data.music_queue.length() !== 0){
+            //         let song_url = shared_data.music_queue.shift(songInfo.videoDetails.video_url);
+            //     } else {
+            //         console.log("queue is empty!!");
+            //     }
+
+            // });
+
+            // Not the best solution, songs should be queueable while idle, what then?
+            // (or queued at almost the exact moment the last song in the queue ends)
+            player.addListener("stateChange", (old_state, new_state) => {
+                if (new_state.status == "idle") {
+                    console.log("Song over, checking queue");
+                    // Could exctract this queue shifting and playing song to a function.
+                    if (shared_data.music_queue.length !== 0){
+                        let song_url = shared_data.music_queue.shift(songInfo.videoDetails.video_url);
+                        stream = ytdl(song_url, { filter: 'audioonly' });
+                        resource = createAudioResource(stream);
+                        player.play (resource);
+                    } else {
+                        console.log("queue is empty!!");
+                    }
+                }
+            });
 
             const collector = interaction.channel.createMessageComponentCollector();
 
@@ -117,8 +138,7 @@ module.exports = {
                     } else {
                         return await interaction.reply('No audio is currently playing.');
                     }
-                }
-                if (interaction.customId === 'pause' && interaction.message.id === currentPlayingMessageId) {
+                } else if (interaction.customId === 'pause' && interaction.message.id === currentPlayingMessageId) {
                     if (player.state.status == "playing") {
                         await player.pause();
                         return await interaction.reply('Song paused!');
@@ -128,9 +148,24 @@ module.exports = {
                     } else {
                         return await interaction.reply(`Unknown state during pause/resume action! State: ${player.state.status}`);
                     }
+                } else if (interaction.customId === 'next' && interaction.message.id === currentPlayingMessageId) {
+                    if (player.state.status == "playing" || player.state.status == "paused") {
+                    // Could exctract this queue shifting and playing song to a function.
+                        if (shared_data.music_queue.length !== 0){
+                            let song_url = shared_data.music_queue.shift();
+                            console.log(`queue after 'next' command: ${shared_data.music_queue}`);
+                            stream = ytdl(song_url, { filter: 'audioonly' });
+                            resource = createAudioResource(stream);
+                            player.play (resource);
+                            return await interaction.reply('Skipping to next song.');
+                        } else {
+                            return await interaction.reply('No songs in queue.');
+                        }
+                    } else {
+                        return await interaction.reply(`Unknown state during pause/resume/next action! State: ${player.state.status}`);
+                    }
                 }
 
-                // Add handler for 'next' after implementing queue.
             });
 
             return await interaction.editReply({
