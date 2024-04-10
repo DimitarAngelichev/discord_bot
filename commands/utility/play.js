@@ -28,6 +28,7 @@ module.exports = {
         }
     },
     async execute(interaction) {
+        // For debug
         let currentPlayingMessageId;
 
         const stop = new ButtonBuilder()
@@ -45,8 +46,7 @@ module.exports = {
             .setLabel('Next Song')
             .setStyle(ButtonStyle.Primary);
 
-        const row = new ActionRowBuilder()
-        .addComponents(pause,next,stop);
+        const row = new ActionRowBuilder().addComponents(pause,next,stop);
 
         // 1. Voice Connection: Check if the user is in a voice channel and joining the channel if so.
 
@@ -88,38 +88,26 @@ module.exports = {
             let player = createAudioPlayer();
             let resource = createAudioResource(stream);
 
-            // TODO:DONE create queue of songs, that queue.js can add songs to.
-
             // 4. Audio Playback: Using the @discordjs/voice functions to play
             // the audio resource in the voice channel.
             player.play(resource);
             connection.subscribe(player);
 
-            // TODO: whenever player is idle -> check queue for song and play it
-            // (also remove it from queue after playing it)
-            // player.on("idle", input => {
-            //     console.log("player is idle!!");
-            //     if (shared_data.music_queue.length() !== 0){
-            //         let song_url = shared_data.music_queue.shift(songInfo.videoDetails.video_url);
-            //     } else {
-            //         console.log("queue is empty!!");
-            //     }
-
-            // });
-
-            // Not the best solution, songs should be queueable while idle, what then?
-            // (or queued at almost the exact moment the last song in the queue ends)
-            player.addListener("stateChange", (old_state, new_state) => {
+            player.addListener("stateChange", async (old_state, new_state) => {
                 if (new_state.status == "idle") {
                     console.log("Song over, checking queue");
                     // Could exctract this queue shifting and playing song to a function.
-                    if (shared_data.music_queue.length !== 0){
+                    if (shared_data.music_queue.length !== 0) {
                         let song_url = shared_data.music_queue.shift(songInfo.videoDetails.video_url);
                         stream = ytdl(song_url, { filter: 'audioonly' });
                         resource = createAudioResource(stream);
                         player.play (resource);
+                        return await interaction.editReply({
+                            content: `Playing next song in queue: ${song_url}!`,
+                            components: [row]
+                        }).then(msg => currentPlayingMessageId = msg.id);
                     } else {
-                        console.log("queue is empty!!");
+                        return await interaction.editReply("Queue is Empty.")
                     }
                 }
             });
@@ -127,29 +115,28 @@ module.exports = {
             const collector = interaction.channel.createMessageComponentCollector();
 
             collector.on('collect', async interaction => {
-                // check player.state.status == 'idle'
+                await interaction.deferReply();
                 console.log(`Check message.id: inter: ${interaction.message.id} curr: ${currentPlayingMessageId}`);
-                // TODO: somehow have to handle stopped songs, idle players
 
-                if (interaction.customId === 'stop' && interaction.message.id === currentPlayingMessageId) {
+                if (interaction.customId === 'stop') {
                     if (player) {
                         await player.stop();
-                        return await interaction.reply('Song stopped!');
+                        return await interaction.editReply('Song stopped!');
                     } else {
-                        return await interaction.reply('No audio is currently playing.');
+                        return await interaction.editReply('No audio is currently playing.');
                     }
-                } else if (interaction.customId === 'pause' && interaction.message.id === currentPlayingMessageId) {
+                } else if (interaction.customId === 'pause') {
                     if (player.state.status == "playing") {
                         await player.pause();
-                        return await interaction.reply('Song paused!');
+                        return await interaction.editReply('Song paused!');
                     } else if (player.state.status == "paused") {
                         await player.unpause();
-                        return await interaction.reply('Resume playing.');
+                        return await interaction.editReply('Resume playing.');
                     } else {
-                        return await interaction.reply(`Unknown state during pause/resume action! State: ${player.state.status}`);
+                        return await interaction.editReply(`Unknown state during pause/resume action! State: ${player.state.status}`);
                     }
-                } else if (interaction.customId === 'next' && interaction.message.id === currentPlayingMessageId) {
-                    if (player.state.status == "playing" || player.state.status == "paused") {
+                } else if (interaction.customId === 'next') {
+                    if (player.state.status == "playing" || player.state.status == "paused" || player.state.status == "idle") {
                     // Could exctract this queue shifting and playing song to a function.
                         if (shared_data.music_queue.length !== 0){
                             let song_url = shared_data.music_queue.shift();
@@ -157,12 +144,15 @@ module.exports = {
                             stream = ytdl(song_url, { filter: 'audioonly' });
                             resource = createAudioResource(stream);
                             player.play (resource);
-                            return await interaction.reply('Skipping to next song.');
+                            return await interaction.editReply({
+                                content: `Skipping to next song: ${song_url}!`,
+                                components: [row]
+                            }).then(msg => currentPlayingMessageId = msg.id);
                         } else {
-                            return await interaction.reply('No songs in queue.');
+                            return await interaction.editReply('No songs in queue.');
                         }
                     } else {
-                        return await interaction.reply(`Unknown state during pause/resume/next action! State: ${player.state.status}`);
+                        return await interaction.editReply(`Unknown state during pause/resume/next action! State: ${player.state.status}`);
                     }
                 }
 
